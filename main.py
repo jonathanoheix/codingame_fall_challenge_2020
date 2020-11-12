@@ -34,6 +34,7 @@ class Witch:
         for recipe in r_list:
             if self.can_make_recipe(recipe) and recipe.price > best_price:
                 best_recipe_id = recipe.id
+                best_price = recipe.price
 
         return best_recipe_id
 
