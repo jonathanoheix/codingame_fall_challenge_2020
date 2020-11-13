@@ -25,14 +25,8 @@ class Cast:
         self.tome_index = t_i
         self.tax_count = t_c
 
-    def cast_boost_value(self):
-        gains = sum([self.deltas[k] * (k + 1) for k in range(len(self.deltas))])
-        launch_difficulty_penalty = 1 - sum([self.deltas[k] * (k + 1) for k in range(len(self.deltas)) if self.deltas[k]
-                                             < 0])
-        repeatability_bonus = self.repeatable + 1
-        # print_debug('gains {} launch_difficulty {} repeatability_bonus {}'.format(gains, launch_difficulty_penalty,
-        # repeatability_bonus))
-        return gains * repeatability_bonus / launch_difficulty_penalty
+    def get_gains(self):
+        return sum([self.deltas[k] * (k + 1) for k in range(len(self.deltas))])
 
 
 class Witch:
@@ -121,28 +115,43 @@ class Witch:
         # if we can't make the recipe
         else:
             # temp_witch.print()
+            superior_item_needed = False
 
             for j in range(len(recipe.costs) - 1, -1, -1):
                 # if we don't have enough of one item but we can boost it or one under it : launch corresponding cast
 
-                superior_items_recipe = sum([recipe.costs[k] for k in range(j, len(recipe.costs))])
-                superior_items_possessed = sum([temp_witch.items[k] for k in range(j, len(temp_witch.items))])
-                print_debug('item {} cost of higher items {}'.format(j, superior_items_recipe -
-                                                                     superior_items_possessed))
-
-                if temp_witch.items[j] < recipe.costs[j] or superior_items_recipe > superior_items_possessed:
+                if temp_witch.items[j] < recipe.costs[j] or superior_item_needed:
                     # print_debug('can boost {} {}'.format(temp_witch.can_boost_item(j), j))
                     if temp_witch.can_boost_item(j):
                         print_debug('boost item {}'.format(j))
                         return temp_witch.boost_item(j)
+                    else:
+                        superior_item_needed = True
 
             # if we could not use any cast : rest to recover them
             print_debug('rest')
             temp_witch.casts = temp_witch.all_casts.copy()
             return 'REST'
 
-    def get_recipe_proximity(self, recipe: Recipe):
-        return sum([max(0, self.items[k] - recipe.costs[k]) * k for k in range(len(recipe.costs))])
+    def get_recipe_distance(self, recipe: Recipe):
+        # if nearly full, return impossible if not enough small items, else weighted sum
+        if self.inventory_limit_size - sum(self.items) < 2:
+            for k in range(0, len(recipe.costs)):
+                if sum(self.items[:k+1]) < sum(recipe.costs[:k+1]):
+                    return 99999
+
+        # else compute distance
+        remaining_costs = [max(0, recipe.costs[k] - self.items[k]) for k in range(len(recipe.costs))]
+        remaining_items = [max(0, self.items[k] - recipe.costs[k]) for k in range(len(recipe.costs))]
+
+        distance = 0
+        for k in range(1, len(remaining_costs)):
+            # TODO improve distance computation
+            pass
+
+        # return sum([max(0, recipe.costs[k] - self.items[k]) * (k + 1) for k in range(len(recipe.costs))])
+
+
 
     def print(self):
         print_debug('items : {}, casts : {}'.format(self.items, [x.id for x in self.casts]))
@@ -162,6 +171,7 @@ while True:
     action_count = int(input())  # the number of spells and recipes in play
     recipes = []
     grimory_casts = []
+    action_made = False
     player_witch.reset()
     opponent_witch.reset()
 
@@ -218,41 +228,41 @@ while True:
     opponent_witch.items = [inv_0, inv_1, inv_2, inv_3]
     opponent_witch.score = score
 
-    # for each cast in the grimory : compute potential gain
-    best_boost_value = 0
-    best_cast = None
-    for c in grimory_casts:
-        boost_value = c.cast_boost_value()
-        # print_debug('cast {} boost_value {}'.format(c.id, boost_value))
-        if boost_value > best_boost_value:
-            best_boost_value = boost_value
-            best_cast = c
-        elif boost_value == best_boost_value and boost_value > 0:
-            if (best_cast.tome_index - best_cast.tax_count) > (c.tome_index - c.tax_count):
-                best_boost_value = boost_value
-                best_cast = c
+    if turn_number < 10:
+        best_cast_value = 0
+        best_cast = None
+        for cast in grimory_casts:
+            cast_value = cast.tax_count - cast.tome_index + cast.get_gains()
+            print_debug('cast {} value : {}'.format(cast.id, cast_value))
+            if cast_value > best_cast_value:
+                best_cast_value = cast_value
+                best_cast = cast
 
-    # if there is an interesting cast to buy
-    if best_boost_value >= 2 and turn_number < 10:
-        # we can buy it
-        if player_witch.items[0] >= best_cast.tome_index:
-            print('LEARN {}'.format(best_cast.id))
-        # we can't buy it : reach that goal
-        else:
-            if player_witch.can_boost_item(0):
-                print(player_witch.boost_item(0))
+        # if there is an interesting cast
+        if best_cast is not None:
+            # if we can buy it
+            if player_witch.items[0] >= best_cast.tome_index:
+                print('LEARN {}'.format(best_cast.id))
             else:
-                print('REST')
+                # else boost item 0
+                if player_witch.can_boost_item(0):
+                    player_witch.boost_item(0)
+                else:
+                    print('REST')
+            action_made = True
 
     # no interesting casts to buy : make the recipes
-    else:
+    if not action_made:
 
         # get best recipe_proximity
-        best_recipe_proximity = 99999
+        best_recipe_distance = 99999
         best_recipe = None
         for r in recipes:
-            if player_witch.get_recipe_proximity(r) < best_recipe_proximity:
-                best_recipe_proximity = player_witch.get_recipe_proximity(r)
+
+            print_debug('recipe {} distance : {}'.format(r.id, player_witch.get_recipe_distance(r)))
+
+            if player_witch.get_recipe_distance(r) < best_recipe_distance:
+                best_recipe_distance = player_witch.get_recipe_distance(r)
                 best_recipe = r
 
         # print best recipe next action
