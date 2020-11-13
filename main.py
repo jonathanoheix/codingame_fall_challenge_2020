@@ -37,6 +37,7 @@ class Witch:
         self.casts = []
         self.all_casts = []
         self.inventory_limit_size = 10
+        self.nb_potions_made = 0
 
     def copy_witch(self):
         new_witch = Witch()
@@ -46,43 +47,36 @@ class Witch:
         new_witch.inventory_limit_size = self.inventory_limit_size
         return new_witch
 
-    def add_cast(self, cast: Cast):
-        self.casts.append(cast)
+    def add_cast(self, added_cast: Cast):
+        self.casts.append(added_cast)
 
-        if cast.id not in [x.id for x in self.all_casts]:
-            self.all_casts.append(cast)
+        if added_cast.id not in [x.id for x in self.all_casts]:
+            self.all_casts.append(added_cast)
 
     def can_boost_item(self, item: int):
-        boosting_casts = [cast for cast in self.casts if cast.deltas[item] > 0]
+        boosting_casts = [x for x in self.casts if x.deltas[item] > 0]
         # print_debug(str([cast.id for cast in boosting_casts]))
         # filter on feasible casts : enough room and enough items
-        for cast in boosting_casts:
-            if sum(np.add(self.items, cast.deltas)) <= self.inventory_limit_size and \
-                    not len([x for x in np.add(self.items, cast.deltas) if x < 0]) > 0:
+        for bc in boosting_casts:
+            if self.can_launch_cast(bc):
                 return True
         return False
 
     def boost_item(self, item: int):
         best_boost = 0
         best_boost_cast = None
-        times = 0
+        t = 0
 
-        for cast in self.casts:
-            has_enough_items = not len([x for x in np.add(self.items, cast.deltas) if x < 0]) > 0
-            has_enough_room = sum(np.add(self.items, cast.deltas)) <= self.inventory_limit_size
-            if cast.deltas[item] > best_boost and has_enough_items and has_enough_room:
-                best_boost_cast = cast
-                best_boost = cast.deltas[item]
+        for bc in self.casts:
+            if bc.get_gains() > best_boost and self.can_launch_cast(bc):
+                best_boost_cast = bc
+                best_boost = bc.get_gains()
 
-        has_enough_items = True
-        has_enough_room = True
         if best_boost_cast.repeatable == 1:
-            while has_enough_items and has_enough_room:
+            while self.can_launch_cast(best_boost_cast):
                 self.use_cast(best_boost_cast)
-                times += 1
-                has_enough_items = not len([x for x in np.add(self.items, best_boost_cast.deltas) if x < 0]) > 0
-                has_enough_room = sum(np.add(self.items, best_boost_cast.deltas)) <= self.inventory_limit_size
-            return 'CAST {} {}'.format(best_boost_cast.id, times)
+                t += 1
+            return 'CAST {} {}'.format(best_boost_cast.id, t)
         else:
             return 'CAST {}'.format(best_boost_cast.id)
 
@@ -99,11 +93,11 @@ class Witch:
                 del (self.casts[j])
                 break
 
-    def use_cast(self, cast: Cast):
-        for k in range(len(cast.deltas)):
-            self.items[k] += cast.deltas[k]
+    def use_cast(self, cast_used: Cast):
+        for k in range(len(cast_used.deltas)):
+            self.items[k] += cast_used.deltas[k]
 
-        self.remove_cast(cast.id)
+        self.remove_cast(cast_used.id)
 
     def next_action_for_recipe(self, recipe: Recipe):
 
@@ -146,12 +140,21 @@ class Witch:
 
         distance = 0
         for k in range(1, len(remaining_costs)):
-            # TODO improve distance computation
-            pass
+            item_level = k - 1
+            # for each remaining cost we assign a distance
+            while remaining_costs[k] > 0:
+                if item_level >= 0:
+                    if remaining_items[item_level] > 0:
+                        distance += k - item_level
+                        remaining_items[item_level] -= 1
+                        remaining_costs[k] -= 1
+                    else:
+                        item_level -= 1
+                else:
+                    distance += k - item_level
+                    remaining_costs[k] -= 1
 
-        # return sum([max(0, recipe.costs[k] - self.items[k]) * (k + 1) for k in range(len(recipe.costs))])
-
-
+        return distance
 
     def print(self):
         print_debug('items : {}, casts : {}'.format(self.items, [x.id for x in self.casts]))
@@ -160,6 +163,11 @@ class Witch:
         self.items = []
         self.score = None
         self.casts = []
+
+    def can_launch_cast(self, cast_launched: Cast):
+        has_enough_items = not len([x for x in np.add(self.items, cast_launched.deltas) if x < 0]) > 0
+        has_enough_room = sum(np.add(self.items, cast_launched.deltas)) <= self.inventory_limit_size
+        return has_enough_items and has_enough_room
 
 
 player_witch = Witch()
@@ -228,6 +236,9 @@ while True:
     opponent_witch.items = [inv_0, inv_1, inv_2, inv_3]
     opponent_witch.score = score
 
+    player_witch.print()
+
+    # at the beginning of the game : get interesting and cheap casts
     if turn_number < 10:
         best_cast_value = 0
         best_cast = None
@@ -254,20 +265,43 @@ while True:
     # no interesting casts to buy : make the recipes
     if not action_made:
 
-        # get best recipe_proximity
-        best_recipe_distance = 99999
-        best_recipe = None
-        for r in recipes:
+        # if room left in inventory and not late game : maximize cast output
+        if player_witch.inventory_limit_size - sum(player_witch.items) > 2 and player_witch.nb_potions_made < 5:
+            best_cast_value = 0
+            best_cast = None
+            for cast in player_witch.casts:
+                if cast.get_gains() > best_cast_value and player_witch.can_launch_cast(cast):
+                    best_cast = cast
+                    best_cast_value = cast.get_gains()
 
-            print_debug('recipe {} distance : {}'.format(r.id, player_witch.get_recipe_distance(r)))
+            if best_cast is not None:
+                if best_cast.repeatable == 1:
+                    times = 0
+                    while player_witch.can_launch_cast(best_cast):
+                        player_witch.use_cast(best_cast)
+                        times += 1
+                    print('CAST {} {}'.format(best_cast.id, times))
+                else:
+                    print('CAST {}'.format(best_cast.id))
 
-            if player_witch.get_recipe_distance(r) < best_recipe_distance:
-                best_recipe_distance = player_witch.get_recipe_distance(r)
-                best_recipe = r
+            else:
+                print('REST')
 
-        # print best recipe next action
-        print_debug(best_recipe.id)
-        print(player_witch.next_action_for_recipe(best_recipe))
+        # inventory almost full : get best recipe_proximity
+        else:
+            best_recipe_distance = 99999
+            best_recipe = None
+            for r in recipes:
+
+                print_debug('recipe {} distance : {}'.format(r.id, player_witch.get_recipe_distance(r)))
+
+                if player_witch.get_recipe_distance(r) < best_recipe_distance:
+                    best_recipe_distance = player_witch.get_recipe_distance(r)
+                    best_recipe = r
+
+            # print best recipe next action
+            print_debug(best_recipe.id)
+            print(player_witch.next_action_for_recipe(best_recipe))
 
     turn_number += 1
 
