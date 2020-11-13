@@ -12,9 +12,6 @@ class Recipe:
         self.costs = [-d_0, -d_1, -d_2, -d_3]
         self.price = p
 
-    def get_reward_cost_ratio(self):
-        return self.price - sum([self.costs[k] * (k + 1) for k in range(len(self.costs))])
-
 
 class Cast:
     def __init__(self, identifier: int, d_0: int, d_1: int, d_2: int, d_3: int, repeatable_cast: int, t_i: int = None,
@@ -68,7 +65,7 @@ class Witch:
         t = 0
 
         for bc in self.casts:
-            if bc.get_gains() > best_boost and self.can_launch_cast(bc):
+            if bc.get_gains() > best_boost and self.can_launch_cast(bc) and bc.deltas[item] > 0:
                 best_boost_cast = bc
                 best_boost = bc.get_gains()
 
@@ -101,34 +98,31 @@ class Witch:
 
     def next_action_for_recipe(self, recipe: Recipe):
 
-        temp_witch = self.copy_witch()
-
-        # if we can't make the recipe
-        if temp_witch.can_make_recipe(recipe):
+        # if we can make the recipe
+        if self.can_make_recipe(recipe):
             return 'BREW {}'.format(recipe.id)
-        # if we can't make the recipe
+        # if we can't make the recipe : test all possible casts
         else:
-            # temp_witch.print()
-            superior_item_needed = False
 
-            for j in range(len(recipe.costs) - 1, -1, -1):
-                # if we don't have enough of one item but we can boost it or one under it : launch corresponding cast
+            min_distance = 99999
+            bc = None
+            for available_cast in self.casts:
+                temp_witch = self.copy_witch()
+                if temp_witch.can_launch_cast(available_cast):
+                    temp_witch.use_cast(available_cast)
+                    distance = temp_witch.get_recipe_distance(recipe)
+                    if distance < min_distance:
+                        bc = available_cast
+                        min_distance = distance
 
-                if temp_witch.items[j] < recipe.costs[j] or superior_item_needed:
-                    # print_debug('can boost {} {}'.format(temp_witch.can_boost_item(j), j))
-                    if temp_witch.can_boost_item(j):
-                        print_debug('boost item {}'.format(j))
-                        return temp_witch.boost_item(j)
-                    else:
-                        superior_item_needed = True
-
+            if bc is not None:
+                return 'CAST {}'.format(bc.id)
             # if we could not use any cast : rest to recover them
-            print_debug('rest')
-            temp_witch.casts = temp_witch.all_casts.copy()
-            return 'REST'
+            else:
+                return 'REST'
 
     def get_recipe_distance(self, recipe: Recipe):
-        # if nearly full, return impossible if not enough small items, else weighted sum
+        # if nearly full, return impossible if not enough small items
         if self.inventory_limit_size - sum(self.items) < 2:
             for k in range(0, len(recipe.costs)):
                 if sum(self.items[:k+1]) < sum(recipe.costs[:k+1]):
@@ -287,16 +281,16 @@ while True:
             else:
                 print('REST')
 
-        # inventory almost full : get best recipe_proximity
+        # inventory almost full : get best recipe ratio score/distance
         else:
-            best_recipe_distance = 99999
+            best_ratio = 0
             best_recipe = None
             for r in recipes:
 
-                print_debug('recipe {} distance : {}'.format(r.id, player_witch.get_recipe_distance(r)))
-
-                if player_witch.get_recipe_distance(r) < best_recipe_distance:
-                    best_recipe_distance = player_witch.get_recipe_distance(r)
+                # print_debug('recipe {} distance : {}'.format(r.id, player_witch.get_recipe_distance(r)))
+                distance = (player_witch.get_recipe_distance(r) + 1) * 0.25
+                if float(r.price / distance) > best_ratio:
+                    best_ratio = float(r.price / distance)
                     best_recipe = r
 
             # print best recipe next action
