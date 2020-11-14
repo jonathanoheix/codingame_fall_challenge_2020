@@ -104,20 +104,33 @@ class Witch:
         # if we can't make the recipe : test all possible casts
         else:
 
+            # look among available casts
             min_distance = 99999
             bc = None
             for available_cast in self.casts:
                 temp_witch = self.copy_witch()
                 if temp_witch.can_launch_cast(available_cast):
                     temp_witch.use_cast(available_cast)
-                    distance = temp_witch.get_recipe_distance(recipe)
-                    if distance < min_distance:
+                    d = temp_witch.get_recipe_distance(recipe)
+                    if d < min_distance:
                         bc = available_cast
-                        min_distance = distance
+                        min_distance = d
 
-            if bc is not None:
+            # look among not available casts
+            bcna = None
+            for not_available_cast in [x for x in self.all_casts if x.id not in [y.id for y in self.casts]]:
+                temp_witch = self.copy_witch()
+                if temp_witch.can_launch_cast(not_available_cast):
+                    temp_witch.use_cast(not_available_cast)
+                    d = temp_witch.get_recipe_distance(recipe)
+                    if d <= min_distance/2:
+                        bcna = not_available_cast
+                        min_distance = d
+
+            # if there are interesting casts
+            if bc is not None and bcna is None:
                 return 'CAST {}'.format(bc.id)
-            # if we could not use any cast : rest to recover them
+            # if we could not use any cast or interested casts are not available: rest to recover them
             else:
                 return 'REST'
 
@@ -132,23 +145,23 @@ class Witch:
         remaining_costs = [max(0, recipe.costs[k] - self.items[k]) for k in range(len(recipe.costs))]
         remaining_items = [max(0, self.items[k] - recipe.costs[k]) for k in range(len(recipe.costs))]
 
-        distance = 0
+        d = 0
         for k in range(1, len(remaining_costs)):
             item_level = k - 1
             # for each remaining cost we assign a distance
             while remaining_costs[k] > 0:
                 if item_level >= 0:
                     if remaining_items[item_level] > 0:
-                        distance += k - item_level
+                        d += k - item_level
                         remaining_items[item_level] -= 1
                         remaining_costs[k] -= 1
                     else:
                         item_level -= 1
                 else:
-                    distance += k - item_level
+                    d += k - item_level
                     remaining_costs[k] -= 1
 
-        return distance
+        return d
 
     def print(self):
         print_debug('items : {}, casts : {}'.format(self.items, [x.id for x in self.casts]))
